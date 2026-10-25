@@ -21,7 +21,7 @@ public final class InteractionGuardTest {
         check(guard.settleDelay(3900) == 0, "Settles after quiet interval");
         check(!guard.scrolled(2300, 4000), "Late delivery of old injected scroll ignored after settling");
         check(guard.directInput(4000), "Mouse click after settling pauses");
-        check(guard.scrolled(4100, 4100), "Manual drag after settling pauses");
+        check(guard.scrolled(4100, 4100), "Manual scroll after settling is outside the injection window");
         check(!guard.directInput(1200), "Delayed injected touch uses event timestamp");
         guard.begin(5000);
         guard.completed(5080);

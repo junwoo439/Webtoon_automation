@@ -29,8 +29,18 @@ public final class CoreTest {
         check(broken.dwellMillis(100, .42, 1) == new PaceModel().dwellMillis(100, .42, 1), "Corrupt settings have defaults");
         for (int chars : new int[]{0, 10, 80, 500, 10000}) {
             long delay = quick.dwellMillis(chars, .42, 1);
-            check(delay >= 1400 && delay <= 30000, "Dwell remains bounded");
+            check(delay >= 350 && delay <= 30000, "Dwell remains bounded");
         }
+        PaceModel defaults = new PaceModel();
+        for (int chars : new int[]{0, 5, 20, 80, 180}) {
+            long slow = defaults.dwellMillis(chars, .42, .5);
+            long normal = defaults.dwellMillis(chars, .42, 1);
+            long fast = defaults.dwellMillis(chars, .42, 2);
+            check(slow > normal && normal > fast, "Speed changes even on low-text panels");
+        }
+        check(PaceModel.swipeMillis(.5) > PaceModel.swipeMillis(1), "Slow speed also changes swipe duration");
+        check(PaceModel.swipeMillis(1) > PaceModel.swipeMillis(2), "Fast speed also changes swipe duration");
+        check(PaceModel.swipeMillis(Double.NaN) == PaceModel.swipeMillis(1), "Invalid swipe speed uses default");
         for (String label : new String[]{"다음 화", "다음화 보기", "다음 회", "다음 편 읽기", "다음 에피소드", "Next episode", "다음 화 〉"})
             check(ButtonPolicy.isNext(label), "Recognize episode button: " + label);
         for (String label : new String[]{"다음", ">", "다음 광고", "다음 화 구매", "이전 화", "다음 화 소장", "추천 다음 화", "다음 화\n100 쿠키"})

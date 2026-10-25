@@ -84,7 +84,7 @@ public final class MainActivity extends Activity {
         content.addView(action("선택한 웹툰 앱 열기", this::launchApp));
 
         LinearLayout privacy = card(); privacy.addView(text("내 폰 안에서 배우는 속도", 17, INK));
-        body(privacy, "화면 글자 인식은 기기에서 처리합니다. 캡처와 대사는 저장하지 않고, 앱별 속도 수치와 학습 횟수만 저장합니다. 학습은 한 번에 최대 5분이며, 너무 짧거나 긴 대기 시간은 제외합니다.");
+        body(privacy, "화면 글자 인식은 기기에서 처리합니다. 캡처와 대사는 저장하지 않고, 앱별 속도 수치와 학습 횟수만 저장합니다. 화면의 작은 ▶/Ⅱ 버튼으로 시작·정지하고, ⋮를 끌면 위치를 옮길 수 있습니다. ⋮를 열어 −/+로 속도를 즉시 바꿀 수 있습니다. 학습은 한 번에 최대 5분이며, 너무 짧거나 긴 대기 시간은 제외합니다.");
         privacy.addView(action("읽기 속도 학습 초기화", () -> new AlertDialog.Builder(this)
             .setTitle("학습한 속도를 지울까요?").setMessage("앱별 읽기 속도가 기본값으로 돌아갑니다.")
             .setNegativeButton("취소", null).setPositiveButton("초기화", (d, w) -> {
@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
             prefs.data.edit().putBoolean("consent", false).apply();
             if (ReaderService.instance != null) ReaderService.instance.refresh(); update();
         }));
-        TextView footer = text("안드로이드 11 이상 · 실험 버전 0.1.1\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
+        TextView footer = text("안드로이드 11 이상 · 실험 버전 0.1.2\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
         space(footer, 16, 0); content.addView(footer);
     }
     private TextView text(String value, int size, int color) {

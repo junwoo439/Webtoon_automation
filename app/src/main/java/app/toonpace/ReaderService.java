@@ -13,6 +13,9 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
+import android.view.MotionEvent;
+import android.view.ViewConfiguration;
+import android.widget.Toast;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -29,10 +32,16 @@ public final class ReaderService extends AccessibilityService {
     private WindowManager windows;
     private LinearLayout overlay;
     private TextView status;
-    private Button start, learn;
+    private Button start, learn, speedButton;
+    private LinearLayout details;
+    private WindowManager.LayoutParams overlayParams;
+    private final ScrollEndTracker endTracker = new ScrollEndTracker();
+    private Runnable pendingScroll;
+    private long readingSince;
+    private int readingCharacters;
     private Mode mode = Mode.OFF;
     private String boundPackage;
-    private int boundWindow, generation, unchanged, captureSerial, manualRevision;
+    private int boundWindow, generation, captureSerial, manualRevision;
     private PaceModel model;
     private ScreenReader.Observation previous, learningScreen;
     private long learningSince, learningDeadline, navigatingUntil, lastNext;
@@ -57,26 +66,89 @@ public final class ReaderService extends AccessibilityService {
         overlay = new LinearLayout(this); overlay.setOrientation(LinearLayout.VERTICAL); overlay.setPadding(dp(9), dp(4), dp(9), dp(5));
         GradientDrawable bg = new GradientDrawable(); bg.setColor(Color.rgb(22, 36, 31)); bg.setCornerRadius(dp(16));
         bg.setStroke(dp(1), Color.rgb(100, 126, 105)); overlay.setBackground(bg);
+        overlay.addOnLayoutChangeListener((v, l, t, r, b, oldL, oldT, oldR, oldB) -> {
+            if (r - l != oldR - oldL || b - t != oldB - oldT) keepOverlayOnScreen();
+        });
         LinearLayout buttons = new LinearLayout(this);
-        start = button("▶ 시작", () -> { if (mode == Mode.OFF) begin(Mode.AUTO); else stop("일시정지"); });
+        start = button("▶", () -> { if (mode == Mode.OFF) begin(Mode.AUTO); else stop("일시정지"); });
+        start.setContentDescription("자동 스크롤 시작 또는 정지");
+        Button menu = button("⋮", () -> {
+            details.setVisibility(details.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+            overlay.post(this::keepOverlayOnScreen);
+        });
+        menu.setContentDescription("조작 메뉴 열기, 끌어서 위치 이동");
+        menu.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY; int initialX, initialY; boolean dragging;
+            public boolean onTouch(View v, MotionEvent e) {
+                if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    downX = e.getRawX(); downY = e.getRawY();
+                    initialX = overlayParams.x; initialY = overlayParams.y; dragging = false; return true;
+                }
+                if (e.getActionMasked() == MotionEvent.ACTION_MOVE) {
+                    float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                    if (Math.hypot(dx, dy) > ViewConfiguration.get(ReaderService.this).getScaledTouchSlop()) dragging = true;
+                    if (dragging) {
+                        overlayParams.x = initialX + Math.round(dx); overlayParams.y = initialY + Math.round(dy);
+                        keepOverlayOnScreen();
+                    }
+                    return true;
+                }
+                if (e.getActionMasked() == MotionEvent.ACTION_UP) { if (!dragging) v.performClick(); return true; }
+                return true;
+            }
+        });
+        buttons.addView(start); buttons.addView(menu); overlay.addView(buttons);
+        details = new LinearLayout(this); details.setOrientation(LinearLayout.VERTICAL);
         learn = button("손으로 학습", () -> { if (mode == Mode.LEARN) stop("학습 저장 완료"); else begin(Mode.LEARN); });
-        Button close = button("닫기", () -> { stop("일시정지"); hideOverlay(); });
-        buttons.addView(start); buttons.addView(learn); buttons.addView(close); overlay.addView(buttons);
+        details.addView(learn);
+        LinearLayout speedRow = new LinearLayout(this);
+        speedRow.addView(button("−", () -> changeSpeed(-.25)));
+        speedButton = button(String.format(java.util.Locale.KOREA, "%.2f×", prefs.speed()), () -> changeSpeed(0));
+        speedButton.setContentDescription("현재 읽기 속도"); speedRow.addView(speedButton);
+        speedRow.addView(button("+", () -> changeSpeed(.25))); details.addView(speedRow);
         status = new TextView(this); status.setTextColor(Color.rgb(205, 218, 206)); status.setTextSize(11);
-        status.setPadding(dp(4), 0, dp(4), dp(4)); status.setText("웹툰을 연 뒤 시작 · 설정은 여기를 탭");
-        status.setOnClickListener(v -> { stop("설정 화면"); startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); });
-        overlay.addView(status);
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,
+        status.setMaxWidth(dp(210)); status.setPadding(dp(4), 0, dp(4), dp(4));
+        status.setText("웹툰을 연 뒤 ▶ · ⋮를 끌어 이동"); details.addView(status);
+        details.addView(button("설정", () -> {
+            stop("설정 화면"); startActivity(new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }));
+        details.addView(button("닫기", () -> { stop("일시정지"); hideOverlay(); }));
+        details.setVisibility(View.GONE); overlay.addView(details);
+        overlayParams = new WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT);
-        params.gravity = Gravity.TOP | Gravity.END; params.y = dp(70); params.x = dp(8);
-        try { windows.addView(overlay, params); } catch (RuntimeException e) { overlay = null; }
+        overlayParams.gravity = Gravity.TOP | Gravity.LEFT;
+        overlayParams.y = dp(150); overlayParams.x = getResources().getDisplayMetrics().widthPixels - dp(116);
+        try { windows.addView(overlay, overlayParams); overlay.post(this::keepOverlayOnScreen); }
+        catch (RuntimeException e) { overlay = null; }
+    }
+    private void keepOverlayOnScreen() {
+        if (overlay == null || overlayParams == null || !overlay.isAttachedToWindow()) return;
+        int width = getResources().getDisplayMetrics().widthPixels, height = getResources().getDisplayMetrics().heightPixels;
+        overlayParams.x = Math.max(0, Math.min(overlayParams.x, width - overlay.getWidth()));
+        overlayParams.y = Math.max(0, Math.min(overlayParams.y, height - overlay.getHeight() - dp(32)));
+        windows.updateViewLayout(overlay, overlayParams);
+    }
+    private void changeSpeed(double delta) {
+        double speed = Math.max(.5, Math.min(2, prefs.speed() + delta));
+        prefs.data.edit().putFloat("speed", (float) speed).apply();
+        speedButton.setText(String.format(java.util.Locale.KOREA, "%.2f×", speed));
+        if (pendingScroll != null && mode == Mode.AUTO) scheduleScroll(generation);
+    }
+    private void scheduleScroll(int token) {
+        if (pendingScroll != null) handler.removeCallbacks(pendingScroll);
+        long dwell = model.dwellMillis(readingCharacters, .42, prefs.speed());
+        long remaining = Math.max(0, dwell - (SystemClock.uptimeMillis() - readingSince));
+        message(String.format(java.util.Locale.KOREA, "%.2f× · 약 %d자 · %.1f초 후 이동", prefs.speed(), readingCharacters, remaining / 1000.0));
+        pendingScroll = () -> { pendingScroll = null; scroll(token); };
+        handler.postDelayed(pendingScroll, remaining);
     }
     private Button button(String label, Runnable action) {
         Button b = new Button(this); b.setText(label); b.setTextSize(12); b.setAllCaps(false);
         b.setTextColor(Color.rgb(193, 245, 131)); b.setMinWidth(0); b.setMinimumWidth(0);
-        b.setPadding(dp(9), 0, dp(9), 0); b.setBackgroundColor(Color.TRANSPARENT);
+        b.setMinimumWidth(dp(48)); b.setMinimumHeight(dp(48));
+        b.setPadding(dp(7), 0, dp(7), 0); b.setBackgroundColor(Color.TRANSPARENT);
         b.setOnClickListener(v -> action.run()); return b;
     }
     private void hideOverlay() {
@@ -90,8 +162,9 @@ public final class ReaderService extends AccessibilityService {
             message("설정에서 선택한 웹툰 앱을 먼저 열어 주세요"); return;
         }
         boundPackage = pkg; boundWindow = root.getWindowId(); model = prefs.model(pkg);
-        mode = requested; generation++; previous = null; unchanged = 0; lastScrollY = -1;
-        start.setText("Ⅱ 정지"); learn.setText(requested == Mode.LEARN ? "학습 끝내기" : "손으로 학습");
+        mode = requested; generation++; previous = null; lastScrollY = -1;
+        start.setText("Ⅱ");
+        details.setVisibility(View.GONE); learn.setText(requested == Mode.LEARN ? "학습 끝내기" : "손으로 학습");
         if (requested == Mode.LEARN) {
             learningDeadline = SystemClock.uptimeMillis() + 5 * 60_000;
             handler.postDelayed(() -> { if (mode == Mode.LEARN) stop("5분 학습이 끝났어요"); }, 5 * 60_000);
@@ -136,18 +209,16 @@ public final class ReaderService extends AccessibilityService {
     private void tick(int token) {
         if (!valid(token) || mode != Mode.AUTO) return;
         capture(token, observation -> {
-            if (previous != null) unchanged = observation.similarTo(previous) ? unchanged + 1 : 0;
+            boolean stalled = endTracker.stalled(observation.similarTo(previous));
             previous = observation;
-            if (unchanged >= 2) {
-                if (observation.next == null) { stop("스크롤이 멈췄어요. 다음 화는 직접 확인해 주세요"); return; }
+            if (stalled && (observation.next != null || endTracker.repeatedlyStalled())) {
+                if (observation.next == null) { stop("여러 번 내려도 이동을 확인하지 못했어요. 화면을 확인해 주세요"); return; }
                 if (!prefs.autoNext()) { stop("끝에 도착했어요. 다음 화를 직접 눌러 주세요"); return; }
                 if (SystemClock.uptimeMillis() - lastNext < 15_000) { stop("연속 이동을 막기 위해 멈췄어요"); return; }
                 countdownNext(token, new Rect(observation.next)); return;
             }
-            long dwell = model.dwellMillis(observation.characters, .42, prefs.speed());
-            message("글자 약 " + observation.characters + "자 · " + String.format(java.util.Locale.KOREA, "%.1f", dwell / 1000.0)
-                + "초 후 스크롤 · 학습 " + model.samples() + "회");
-            handler.postDelayed(() -> scroll(token), dwell);
+            readingCharacters = observation.characters; readingSince = SystemClock.uptimeMillis();
+            scheduleScroll(token);
         });
     }
     private void scroll(int token) {
@@ -155,10 +226,20 @@ public final class ReaderService extends AccessibilityService {
         // Recheck live accessibility nodes at the moment of action, not only before the dwell.
         if (ButtonPolicy.isBlocked(ScreenReader.nodeText(getRootInActiveWindow()))) { stop("안내 화면이 있어 멈췄어요"); return; }
         int h = getResources().getDisplayMetrics().heightPixels, w = getResources().getDisplayMetrics().widthPixels;
-        Path path = new Path(); path.moveTo(w * .48f, h * .76f); path.lineTo(w * .48f, h * .34f);
+        float swipeX = w * .48f;
+        if (overlay != null) {
+            int[] location = new int[2]; overlay.getLocationOnScreen(location);
+            for (float candidate : new float[]{w * .48f, w * .22f, w * .78f}) {
+                if (candidate < location[0] - dp(12) || candidate > location[0] + overlay.getWidth() + dp(12)) {
+                    swipeX = candidate; break;
+                }
+            }
+        }
+        Path path = new Path(); path.moveTo(swipeX, h * .76f); path.lineTo(swipeX, h * .34f);
+        endTracker.beginSwipe(SystemClock.uptimeMillis());
         interaction.begin(SystemClock.uptimeMillis());
         boolean accepted = dispatchGesture(new GestureDescription.Builder()
-            .addStroke(new GestureDescription.StrokeDescription(path, 0, 650)).build(), new GestureResultCallback() {
+            .addStroke(new GestureDescription.StrokeDescription(path, 0, PaceModel.swipeMillis(prefs.speed()))).build(), new GestureResultCallback() {
             @Override public void onCompleted(GestureDescription gesture) {
                 if (token != generation || mode != Mode.AUTO) return;
                 interaction.completed(SystemClock.uptimeMillis());
@@ -192,7 +273,7 @@ public final class ReaderService extends AccessibilityService {
                 @Override public void onCompleted(GestureDescription gesture) {
                     if (token != generation || mode != Mode.AUTO) return;
                     interaction.completed(SystemClock.uptimeMillis());
-                    previous = null; unchanged = 0; message("다음 화를 기다리고 있어요");
+                    previous = null; endTracker.reset(); message("다음 화를 기다리고 있어요");
                     handler.postDelayed(() -> tick(token), 4000);
                 }
                 @Override public void onCancelled(GestureDescription gesture) { if (token == generation) stop("이동이 취소되었어요"); }
@@ -235,8 +316,12 @@ public final class ReaderService extends AccessibilityService {
             boolean direct = type == AccessibilityEvent.TYPE_TOUCH_INTERACTION_START
                 || type == AccessibilityEvent.TYPE_VIEW_CLICKED
                 || type == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED;
-            if ((direct && interaction.directInput(eventTime))
-                    || (type == AccessibilityEvent.TYPE_VIEW_SCROLLED && interaction.scrolled(eventTime, now))) {
+            if (type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+                interaction.scrolled(eventTime, now);
+                endTracker.onScroll(eventTime, event.getScrollDeltaY(), event.getScrollY());
+            }
+            // Scroll events can come from delayed rendering, not only user input.
+            if (direct && interaction.directInput(eventTime)) {
                 stop("직접 조작하여 멈췄어요"); return;
             }
         }
@@ -253,11 +338,13 @@ public final class ReaderService extends AccessibilityService {
     private void message(String text) { if (status != null) status.setText(text); }
     private void stop(String reason) {
         generation++; mode = Mode.OFF; handler.removeCallbacksAndMessages(null);
-        captureSerial++; captureBusy = false;
+        captureSerial++; captureBusy = false; pendingScroll = null; endTracker.reset();
         if (overlay != null) overlay.setVisibility(View.VISIBLE);
-        previous = null; learningScreen = null; unchanged = 0; learnedDistance = 0; navigatingUntil = 0;
+        previous = null; learningScreen = null; learnedDistance = 0; navigatingUntil = 0;
         interaction.reset(SystemClock.uptimeMillis());
-        if (start != null) start.setText("▶ 시작"); if (learn != null) learn.setText("손으로 학습"); message(reason);
+        if (start != null) start.setText("▶"); if (learn != null) learn.setText("손으로 학습"); message(reason);
+        if (overlay != null && !"준비 중".equals(reason) && !"종료".equals(reason))
+            Toast.makeText(this, reason, Toast.LENGTH_SHORT).show();
     }
     void showControls() { showOverlay(); }
     void pauseForSettings() { stop("설정이 바뀌어 멈췄어요"); }

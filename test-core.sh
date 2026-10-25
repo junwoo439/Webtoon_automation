@@ -6,6 +6,8 @@ java -m jdk.compiler/com.sun.tools.javac.Main -encoding UTF-8 -d build/core-test
   app/src/main/java/app/toonpace/PaceModel.java \
   app/src/main/java/app/toonpace/ButtonPolicy.java \
   app/src/main/java/app/toonpace/InteractionGuard.java \
-  tests/CoreTest.java tests/InteractionGuardTest.java
+  app/src/main/java/app/toonpace/ScrollEndTracker.java \
+  tests/CoreTest.java tests/InteractionGuardTest.java tests/ScrollEndTest.java
 java -cp build/core-test app.toonpace.CoreTest
 java -cp build/core-test app.toonpace.InteractionGuardTest
+java -cp build/core-test app.toonpace.ScrollEndTest
