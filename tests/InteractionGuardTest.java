@@ -34,6 +34,10 @@ public final class InteractionGuardTest {
         guard.completed(8650);
         for (long t = 9000; t < 15000; t += 500) guard.scrolled(t, t);
         check(guard.settleDelay(15000) == 0, "Continuous events cannot extend settling forever");
+        guard.reset(20000); guard.begin(21000, 300); guard.completed(21150);
+        check(guard.settleDelay(21450) == 0, "Fast reading need not wait a fixed 900ms");
+        guard.begin(22000, 300); guard.completed(22150); guard.scrolled(22300, 22300);
+        check(guard.settleDelay(22450) > 0, "Fast mode still waits for continuing scroll animation");
         System.out.println("PASS: " + checks + " interaction checks");
     }
 }

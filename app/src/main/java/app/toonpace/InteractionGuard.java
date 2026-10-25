@@ -5,7 +5,7 @@ package app.toonpace;
  * remains the unconditional way to pause.
  */
 final class InteractionGuard {
-    private static final long QUIET_MILLIS = 900;
+    private long quietMillis = 900;
     private long startedAt, ignoreThrough, settleDeadline;
     private boolean injecting, settling;
 
@@ -15,16 +15,18 @@ final class InteractionGuard {
         injecting = settling = false;
     }
 
-    void begin(long now) {
+    void begin(long now) { begin(now, 900); }
+    void begin(long now, long quiet) {
+        quietMillis = Math.max(300, Math.min(900, quiet));
         injecting = true;
         settling = true;
-        ignoreThrough = now + QUIET_MILLIS;
+        ignoreThrough = now + quietMillis;
         settleDeadline = now + 6000;
     }
 
     void completed(long now) {
         injecting = false;
-        ignoreThrough = now + QUIET_MILLIS;
+        ignoreThrough = now + quietMillis;
         settleDeadline = now + 6000;
     }
 
@@ -35,7 +37,7 @@ final class InteractionGuard {
     boolean scrolled(long eventTime, long now) {
         if (eventTime <= startedAt) return false;
         if (injecting || eventTime <= ignoreThrough) {
-            if (settling) ignoreThrough = Math.min(settleDeadline, Math.max(ignoreThrough, now + QUIET_MILLIS));
+            if (settling) ignoreThrough = Math.min(settleDeadline, Math.max(ignoreThrough, now + quietMillis));
             return false;
         }
         return true;

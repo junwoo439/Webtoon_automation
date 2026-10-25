@@ -15,11 +15,11 @@ public final class PaceModel {
     public long dwellMillis(int characters, double viewportFraction, double speed) {
         double fraction = clamp(finite(viewportFraction, .42), .15, 1);
         double seconds = (visualSeconds + textSecondsPer80 * clamp(characters, 0, 500) / 80.0)
-            * fraction / clamp(finite(speed, 1), .5, 2);
+            * fraction / clamp(finite(speed, 1), .5, 5);
         return Math.round(clamp(seconds * 1000, 350, 30000));
     }
     public static long swipeMillis(double speed) {
-        return Math.round(650 / clamp(finite(speed, 1), .5, 2));
+        return Math.round(Math.max(150, 650 / clamp(finite(speed, 1), .5, 5)));
     }
     /** Input is the OLD viewport, dwell until the next manual scroll, and distance moved. */
     public boolean learn(int characters, long elapsedMillis, double viewportFraction) {

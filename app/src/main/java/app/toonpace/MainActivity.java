@@ -54,15 +54,15 @@ public final class MainActivity extends Activity {
         LinearLayout apps = card(); apps.addView(text("02   사용할 앱 선택", 18, INK));
         appsStatus = body(apps, "");
         apps.addView(action("웹툰 앱 · 브라우저 선택", this::chooseApps));
-        body(apps, "선택한 앱에서만 동작합니다. 브라우저는 웹툰 회차를 연 뒤 시작하세요. 멈추려면 떠 있는 Ⅱ 정지 버튼을 누르세요. 직접 터치 감지는 앱과 기기에 따라 제한될 수 있어요.");
+        body(apps, "선택한 앱에서만 동작합니다. 브라우저는 웹툰 회차를 연 뒤 시작하세요. 멈추려면 떠 있는 Ⅱ 정지 버튼을 누르세요. 자동 읽기 중 화면을 누르면 일시정지합니다. 첫 터치는 정지에 사용되고, 웹툰 조작은 멈춘 뒤 다시 터치하세요. 자동 스와이프가 진행되는 짧은 동안은 감지가 제한될 수 있어요.");
 
         LinearLayout pace = card(); pace.addView(text("03   내 속도 찾기", 18, INK));
         body(pace, "웹툰 화면의 떠 있는 버튼에서 ‘손으로 학습’을 누르고 평소처럼 읽어 보세요. 글자량과 스크롤 간격으로 앱별 읽기 속도를 맞춥니다.");
         learningStatus = body(pace, "");
         TextView speedLabel = body(pace, "");
-        SeekBar speed = new SeekBar(this); speed.setMax(15); speed.setProgress((int) Math.round((prefs.speed() - .5) * 10));
+        SeekBar speed = new SeekBar(this); speed.setMax(45); speed.setProgress((int) Math.round((prefs.speed() - .5) * 10));
         speedLabel.setText(String.format(Locale.KOREA, "읽기 속도  %.1f×", prefs.speed()));
-        speed.setContentDescription("읽기 속도, 0.5배부터 2배까지");
+        speed.setContentDescription("읽기 속도, 0.5배부터 5배까지");
         speed.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             public void onProgressChanged(SeekBar bar, int progress, boolean user) {
                 float value = .5f + progress / 10f; prefs.data.edit().putFloat("speed", value).apply();
@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
             prefs.data.edit().putBoolean("consent", false).apply();
             if (ReaderService.instance != null) ReaderService.instance.refresh(); update();
         }));
-        TextView footer = text("안드로이드 11 이상 · 실험 버전 0.1.2\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
+        TextView footer = text("안드로이드 11 이상 · 실험 버전 0.1.3\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
         space(footer, 16, 0); content.addView(footer);
     }
     private TextView text(String value, int size, int color) {

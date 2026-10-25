@@ -41,7 +41,9 @@ public final class CoreTest {
         check(PaceModel.swipeMillis(.5) > PaceModel.swipeMillis(1), "Slow speed also changes swipe duration");
         check(PaceModel.swipeMillis(1) > PaceModel.swipeMillis(2), "Fast speed also changes swipe duration");
         check(PaceModel.swipeMillis(Double.NaN) == PaceModel.swipeMillis(1), "Invalid swipe speed uses default");
-        for (String label : new String[]{"다음 화", "다음화 보기", "다음 회", "다음 편 읽기", "다음 에피소드", "Next episode", "다음 화 〉"})
+        check(defaults.dwellMillis(80, .42, 5) < defaults.dwellMillis(80, .42, 2), "5x is faster than previous 2x maximum");
+        check(PaceModel.swipeMillis(5) < PaceModel.swipeMillis(2), "5x swipe is faster than 2x");
+        for (String label : new String[]{"다음 화", "다음화 보기", "다음 회", "다음 회차 보기", "다음 편 읽기", "다음 에피소드", "Next episode", "다음 화 〉"})
             check(ButtonPolicy.isNext(label), "Recognize episode button: " + label);
         for (String label : new String[]{"다음", ">", "다음 광고", "다음 화 구매", "이전 화", "다음 화 소장", "추천 다음 화", "다음 화\n100 쿠키"})
             check(!ButtonPolicy.isNext(label), "Do not guess ambiguous next: " + label);
