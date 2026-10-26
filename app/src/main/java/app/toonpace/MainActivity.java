@@ -12,6 +12,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.View;
+import android.view.WindowInsets;
+import android.graphics.Insets;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -33,13 +35,24 @@ public final class MainActivity extends Activity {
     private Prefs prefs;
     private TextView serviceStatus, appsStatus, learningStatus;
     private LinearLayout content;
+    private BannerSlot banner;
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
     @Override public void onCreate(Bundle state) {
         super.onCreate(state); prefs = new Prefs(this);
         getWindow().setStatusBarColor(BG); getWindow().setNavigationBarColor(BG);
         ScrollView scroll = new ScrollView(this); scroll.setBackgroundColor(BG); scroll.setFillViewport(true);
         content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(24), dp(38), dp(24), dp(32));
-        scroll.addView(content); setContentView(scroll);
+        scroll.addView(content);
+        LinearLayout screen = new LinearLayout(this); screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(BG);
+        screen.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        banner = new BannerSlot(this, BuildConfig.DEBUG);
+        screen.addView(banner, new LinearLayout.LayoutParams(-1, -2));
+        screen.setOnApplyWindowInsetsListener((view, insets) -> {
+            Insets safe = insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout());
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom); return insets;
+        });
+        setContentView(screen); screen.requestApplyInsets();
         TextView brand = text("TOONPACE  /  툰페이스", 12, LIME); brand.setLetterSpacing(.16f); content.addView(brand);
         TextView title = text("이야기에만\n집중하세요.", 37, INK); title.setTypeface(null, Typeface.BOLD); space(title, 22, 12); content.addView(title);
         TextView intro = text("대사가 많으면 천천히.\n내가 읽는 속도에 맞춰 내려가는 웹툰 도우미.", 16, MUTED);
@@ -74,7 +87,7 @@ public final class MainActivity extends Activity {
         Switch next = new Switch(this); next.setText("다음 화 자동 이동"); next.setTextColor(INK); next.setTextSize(16);
         next.setPadding(0, dp(14), 0, dp(12)); next.setChecked(prefs.autoNext());
         next.setOnCheckedChangeListener((button, checked) -> prefs.data.edit().putBoolean("next", checked).apply()); pace.addView(next);
-        body(pace, "화면 끝과 ‘다음 화’ 버튼을 확인한 뒤 3초를 기다립니다. 결제·대여·로그인 안내가 보이면 멈춥니다. 무료 회차에서만 사용하고, 서비스의 자동 구매 설정은 먼저 꺼 주세요.");
+        body(pace, "화면 끝과 다음 회차 버튼을 확인한 뒤 3초를 기다립니다. ‘다음 편’, ‘다음 회차로 이동’ 등도 인식합니다. ⋮의 ‘다음 화 인식 확인’으로 현재 버튼을 확인할 수 있어요. 결제·대여·로그인·광고 시청 안내가 보이면 멈춥니다. 무료 회차에서만 사용하고, 서비스의 자동 구매 설정은 먼저 꺼 주세요.");
 
         Button controls = action("떠 있는 조작 버튼 표시", () -> {
             if (!prefs.consent() || !enabled()) requestAccess();
@@ -95,7 +108,7 @@ public final class MainActivity extends Activity {
             prefs.data.edit().putBoolean("consent", false).apply();
             if (ReaderService.instance != null) ReaderService.instance.refresh(); update();
         }));
-        TextView footer = text("안드로이드 11 이상 · 실험 버전 0.1.3\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
+        TextView footer = text("안드로이드 11 이상 · 실험 버전 " + BuildConfig.VERSION_NAME + "\n각 서비스의 실제 화면에서 확인이 필요해요.", 12, MUTED);
         space(footer, 16, 0); content.addView(footer);
     }
     private TextView text(String value, int size, int color) {
@@ -174,5 +187,7 @@ public final class MainActivity extends Activity {
         int count = 0; for (String pkg : prefs.allowed()) count += prefs.model(pkg).samples();
         learningStatus.setText(count == 0 ? "아직 학습 전이에요. 기본 속도로도 시작할 수 있어요." : "선택한 앱에서 " + count + "회 학습했어요.");
     }
-    @Override protected void onResume() { super.onResume(); if (prefs != null) update(); }
+    @Override protected void onResume() { super.onResume(); if (prefs != null) update(); if (banner != null) banner.resume(); }
+    @Override protected void onPause() { if (banner != null) banner.pause(); super.onPause(); }
+    @Override protected void onDestroy() { if (banner != null) banner.destroy(); super.onDestroy(); }
 }

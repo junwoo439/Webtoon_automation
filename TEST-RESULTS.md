@@ -1,20 +1,33 @@
-# 0.1.3 검증 결과
+# ToonPace 0.1.4 검증 기록
 
-- 핵심 로직 검사 84개, 입력 판정 검사 19개, 끝 후보 판정 검사 43개: 총 146개 통과.
-- 5배 대기/스와이프 시간이 이전 최대 2배보다 짧아지는 것, 빠른 속도의 안정화 대기, 계속 움직일 때 추가 대기, 최대 위치 도달 판단, 끝에서의 불필요한 이동량 이벤트, 지연 로딩으로 최대 위치가 바뀌는 경우, 비슷한 여백에서 회차를 건너뛰지 않는 것을 확인.
-- 최종 :app:assembleDebug 및 :app:lintDebug 성공. Gradle 8.11.1 / AGP 8.9.2 / JDK 21.0.13 / SDK 35.
-- APK 서명 검증 통과. 이전 0.1.2와 동일한 인증서로 서명되어 업데이트 가능. versionCode 4, versionName 0.1.3.
-- 최종 APK에 INTERNET 권한 없음.
-- 실기기/에뮬레이터 실행은 여기서 하지 못함. 새 투명 터치 영역의 터치 수신, 조작부보다 아래에 배치되는지, 정지 후 정상 조작, 자동 제스처 주입 중의 입력, 카카오페이지의 실제 다음 화 버튼 인식/이동은 휴대폰에서 확인 필요.
-- 다음 화 기능은 버튼 문구/위치 및 끝 판정에 의존하며, 결제/로그인 차단 조건은 유지됨. 실제 문제 화면의 버튼 문구는 아직 제공되지 않았음.
-- 앱의 첫 터치는 일시정지에 사용됨. 자동 제스처 주입 중에는 터치 영역을 일시적으로 숨기므로 항상 모든 터치를 잡는다고 보장하지 않음. Ⅱ 버튼 유지.
+2026-10-26, 클라우드 Linux 환경. 실제 휴대폰/카카오페이지 실행 검증은 포함하지 않습니다.
 
-## Lint 경고 (7개)
+## 실행 결과
 
-- UseSwitchCompatOrMaterialCode: Use `SwitchCompat` from AppCompat or `SwitchMaterial` from Material library
-- DataExtractionRules: The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher.
-- StaticFieldLeak: Do not place Android context classes in static fields (static reference to `ReaderService` which has field `overlay` pointing to `LinearLayout`); this is a memory leak
-- UnusedResources: The resource `R.string.app_name` appears to be unused
-- ClickableViewAccessibility: Custom view ``Button`` has `setOnTouchListener` called on it but does not override `performClick`
-- ClickableViewAccessibility: `onTouch` lambda should call `View#performClick` when a click is detected
-- RtlHardcoded: Use "`Gravity.START`" instead of "`Gravity.LEFT`" to ensure correct behavior in right-to-left locales
+- `sh test-core.sh`: **222개 검사 통과** — 속도·문구 84, 입력 구분 19, 스크롤 끝 47, 다음 회차 후보·화면 구조 72.
+- `:app:assembleDebug :app:lintDebug :app:bundleRelease`: 최종 **BUILD SUCCESSFUL**, 40초, 94개 작업 중 23개 실행·71개 up-to-date.
+- Lint: 오류 0, 경고 7. 기존 Switch 사용, dataExtractionRules, 서비스 정적 참조, 미사용 리소스, 터치 리스너 접근성 2건, LEFT 정렬 관련 경고가 남았습니다.
+- APK: package `app.toonpace`, versionName `0.1.4`, versionCode `5`, 52,565,699 bytes.
+- APK 서명 검증 통과. 이전 테스트 APK와 동일한 Android Debug 인증서.
+- 인증서 SHA-256: `aa5baa7e67538546d902507c01fd19d3cbbf764fedb15cc32420e802ec646625`.
+- AAB: `app/build/outputs/bundle/release/app-release.aab`, 21,584,826 bytes. 업로드 키를 설정하지 않아 **미서명**이며 Play 제출용 최종 파일이 아닙니다. `jarsigner -verify`에서 unsigned 확인.
+- 최종 APK/AAB ZIP 무결성 확인.
+- APK `zipalign -c -P 16 4` 통과. APK/AAB의 arm64-v8a, x86_64 ML Kit 라이브러리 LOAD 세그먼트는 모두 16 KB 정렬. armeabi-v7a, x86 32비트 라이브러리는 4 KB 정렬이며 별도로 구분했습니다. 16 KB Android 실기기 실행은 미검증.
+- APK의 uses-permission은 앱 내부 signature 수준 receiver 권한뿐입니다. INTERNET/ACCESS_NETWORK_STATE를 추가하지 않았고 실제 광고 SDK도 없습니다. 접근성 서비스 권한 선언은 별도로 유지됩니다.
+
+## 회귀 검사 범위
+
+- 사용자가 제공한 두 작품의 `다음화 무료로 보기` / `다음화 보기` 문구와 카드·추천 제목 위치를 사람이 읽어 옮긴 사례.
+- 다음 회차 카드 아래의 `이 작품과 함께보는 웹툰` 제목으로 회차 종료 판단. 추천 목록의 물리적인 끝까지 내리지 않음.
+- 글자 크기/화면 크기 변화, 줄이 분리된 문구, 같은 후보의 OCR/접근성 중복, 서로 다른 후보의 모호함, 화면 상단 쪽으로 이동한 하단 카드.
+- 원작소설 링크·추천 화살표·이전 회차·결제/광고 문구 제외.
+- 스크롤 최대 위치가 반복 확인될 때 중앙 애니메이션과 구별. 추가 콘텐츠가 로딩되면 종료 근거 취소.
+
+이 검사는 ML Kit를 제공된 이미지 픽셀에 실행한 결과가 아니며 OCR 정확도, 이미지 모델 학습 결과 또는 실기기 성공률을 뜻하지 않습니다. 새 딥러닝 모델은 학습하지 않았습니다. 사전 학습된 ML Kit OCR 뒤의 판별 로직을 수정했습니다.
+
+## 아직 확인할 항목
+
+- 카카오페이지 실제 Android UI의 접근성 노드, OCR 출력, 다음 회차 열림, 터치 정지 및 화면 회전.
+- 실제 광고 어댑터, AdMob/UMP, 광고 동의/no-fill/실제 수익. 현재는 Activity 하단 슬롯과 debug 미리보기만 구현했습니다.
+- 실제 업로드 키를 사용한 AAB 서명, Play Console 업로드·심사, 계정별 테스트 요건 및 제출일 target API 충족. 현재 targetSdk 35.
+- 공식 Google 정책 사이트는 이 환경의 네트워크 정책으로 접속이 차단되어 최신 내용을 조회하지 못했습니다. docs/PLAY-STORE.md의 공식 링크와 Console에서 재확인해야 합니다.

@@ -24,7 +24,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public final class ReaderService extends AccessibilityService {
-    enum Mode { OFF, AUTO, LEARN }
+    enum Mode { OFF, AUTO, LEARN, CHECK }
     static ReaderService instance;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Prefs prefs;
@@ -111,6 +111,7 @@ public final class ReaderService extends AccessibilityService {
             nextButton.setText(enabled ? "다음 화 자동: 켜짐" : "다음 화 자동: 꺼짐");
         });
         details.addView(nextButton);
+        details.addView(button("다음 화 인식 확인", () -> begin(Mode.CHECK)));
         LinearLayout speedRow = new LinearLayout(this);
         speedRow.addView(button("−", () -> changeSpeed(-.25)));
         speedButton = button(String.format(java.util.Locale.KOREA, "%.2f×", prefs.speed()), () -> changeSpeed(0));
@@ -197,7 +198,17 @@ public final class ReaderService extends AccessibilityService {
         mode = requested; generation++; previous = null; lastScrollY = -1;
         start.setText("Ⅱ");
         details.setVisibility(View.GONE); learn.setText(requested == Mode.LEARN ? "학습 끝내기" : "손으로 학습");
-        if (requested == Mode.LEARN) {
+        if (requested == Mode.CHECK) {
+            capture(generation, observation -> {
+                String result = observation.blocked ? "결제·로그인·광고 시청 문구가 있어 자동 이동을 멈춥니다."
+                    : observation.next == null ? "다음 화 버튼을 확실히 찾지 못했어요. 버튼이 보이는 화면을 확인해 주세요."
+                    : "인식: " + observation.nextLabel + "\n방법: " + observation.nextSource
+                        + (observation.footerReady ? "\n회차 하단 영역도 확인했어요." : "\n회차 하단 또는 스크롤 끝 확인이 필요해요.")
+                        + "\n자동 이동을 켜고 ▶를 눌러 주세요.";
+                stop("인식 확인 완료");
+                details.setVisibility(View.VISIBLE); message(result); overlay.post(this::keepOverlayOnScreen);
+            });
+        } else if (requested == Mode.LEARN) {
             learningDeadline = SystemClock.uptimeMillis() + 5 * 60_000;
             handler.postDelayed(() -> { if (mode == Mode.LEARN) stop("5분 학습이 끝났어요"); }, 5 * 60_000);
             captureLearning(generation);
@@ -232,9 +243,10 @@ public final class ReaderService extends AccessibilityService {
             if (error != null) { stop(error); return; }
             AccessibilityNodeInfo root = getRootInActiveWindow();
             String allText = observation.visibleText + "\n" + ScreenReader.nodeText(root);
-            if (ButtonPolicy.isBlocked(allText)) { stop("결제·로그인 등의 안내가 있어 멈췄어요"); return; }
-            Rect nodeButton = ScreenReader.findNext(root, getResources().getDisplayMetrics().heightPixels);
-            if (nodeButton != null) observation.next = nodeButton;
+            observation.blocked = ButtonPolicy.isBlocked(allText);
+            if (observation.blocked && mode != Mode.CHECK) { stop("결제·로그인·광고 시청 안내가 있어 멈췄어요"); return; }
+            ScreenReader.resolveNext(root, observation, getResources().getDisplayMetrics().widthPixels,
+                getResources().getDisplayMetrics().heightPixels);
             callback.done(observation);
         }, () -> { if (serial == captureSerial && overlay != null) overlay.setVisibility(View.VISIBLE); }), 100);
     }
@@ -243,11 +255,12 @@ public final class ReaderService extends AccessibilityService {
         capture(token, observation -> {
             boolean stalled = endTracker.stalled(observation.similarTo(previous));
             previous = observation;
-            if ((observation.next != null && (stalled || endTracker.nextReady())) || endTracker.repeatedlyStalled()) {
+            if ((observation.next != null && (observation.footerReady || stalled || endTracker.nextReady()))
+                    || endTracker.repeatedlyStalled()) {
                 if (observation.next == null) { stop("여러 번 내려도 이동을 확인하지 못했어요. 화면을 확인해 주세요"); return; }
                 if (!prefs.autoNext()) { stop("끝에 도착했어요. 다음 화를 직접 눌러 주세요"); return; }
                 if (SystemClock.uptimeMillis() - lastNext < 15_000) { stop("연속 이동을 막기 위해 멈췄어요"); return; }
-                countdownNext(token, new Rect(observation.next)); return;
+                countdownNext(token, new Rect(observation.next), observation.footerReady); return;
             }
             readingCharacters = observation.characters; readingSince = SystemClock.uptimeMillis();
             scheduleScroll(token);
@@ -290,10 +303,11 @@ public final class ReaderService extends AccessibilityService {
         if (delay > 0) handler.postDelayed(() -> afterScrollSettled(token), delay);
         else tick(token);
     }
-    private void countdownNext(int token, Rect expected) {
+    private void countdownNext(int token, Rect expected, boolean requireFooter) {
         message("3초 후 다음 화 · 취소하려면 Ⅱ 정지");
         handler.postDelayed(() -> capture(token, fresh -> {
             if (mode != Mode.AUTO || !prefs.autoNext() || fresh.next == null
+                    || (requireFooter && !fresh.footerReady)
                     || Math.abs(fresh.next.centerX() - expected.centerX()) > dp(40)
                     || Math.abs(fresh.next.centerY() - expected.centerY()) > dp(40)) {
                 stop("버튼이나 화면이 바뀌어 멈췄어요"); return;
@@ -304,20 +318,30 @@ public final class ReaderService extends AccessibilityService {
             navigatingUntil = SystemClock.uptimeMillis() + 8000; lastNext = SystemClock.uptimeMillis();
             showTouchPause(false);
             if (overlay != null) overlay.setVisibility(View.INVISIBLE);
+            // Prefer the app's actual enabled button action. Text bounds are only
+            // a fallback tap target when the app exposes no clickable UI node.
+            if (ScreenReader.clickNext(getRootInActiveWindow(), fresh.next,
+                    getResources().getDisplayMetrics().widthPixels,
+                    getResources().getDisplayMetrics().heightPixels, dp(40))) {
+                nextDispatched(token); return;
+            }
             boolean accepted = dispatchGesture(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(path, 100, 80)).build(), new GestureResultCallback() {
                 @Override public void onCompleted(GestureDescription gesture) {
-                    if (token != generation || mode != Mode.AUTO) return;
-                    interaction.completed(SystemClock.uptimeMillis());
-                    if (overlay != null) overlay.setVisibility(View.VISIBLE);
-                    showTouchPause(true);
-                    previous = null; endTracker.reset(); message("다음 화를 기다리고 있어요");
-                    handler.postDelayed(() -> tick(token), 4000);
+                    nextDispatched(token);
                 }
                 @Override public void onCancelled(GestureDescription gesture) { if (token == generation) stop("이동이 취소되었어요"); }
             }, handler);
             if (!accepted) stop("다음 화를 누를 수 없어요");
         }), 3000);
+    }
+    private void nextDispatched(int token) {
+        if (token != generation || mode != Mode.AUTO) return;
+        interaction.completed(SystemClock.uptimeMillis());
+        if (overlay != null) overlay.setVisibility(View.VISIBLE);
+        showTouchPause(true);
+        previous = null; endTracker.reset(); message("다음 화를 기다리고 있어요");
+        handler.postDelayed(() -> tick(token), 4000);
     }
     private void captureLearning(int token) {
         if (!valid(token) || mode != Mode.LEARN) return;

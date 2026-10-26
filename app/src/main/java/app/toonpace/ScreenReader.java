@@ -11,6 +11,8 @@ import com.google.mlkit.vision.text.Text;
 import com.google.mlkit.vision.text.TextRecognition;
 import com.google.mlkit.vision.text.TextRecognizer;
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions;
+import java.util.ArrayList;
+import java.util.List;
 
 final class ScreenReader {
     interface Callback { void done(Observation result, String error); }
@@ -18,6 +20,9 @@ final class ScreenReader {
         int characters;
         String visibleText = "";
         Rect next;
+        String nextLabel = "", nextSource = "";
+        boolean blocked, footerReady;
+        final List<NextButtonDetector.Label> labels = new ArrayList<>();
         int[] fingerprint;
         boolean similarTo(Observation old) {
             if (old == null || old.fingerprint == null || fingerprint == null) return false;
@@ -63,9 +68,9 @@ final class ScreenReader {
                                 visible.append(line.getText()).append('\n');
                                 if (box.top > height * .14 && box.bottom < height * .86)
                                     observation.characters += (int) line.getText().codePoints().filter(Character::isLetterOrDigit).count();
-                                if (ButtonPolicy.isNext(line.getText()) && box.centerY() > height * .45
-                                        && box.left >= 0 && box.right <= width)
-                                    observation.next = new Rect(box);
+                                if (observation.labels.size() < 200)
+                                    observation.labels.add(new NextButtonDetector.Label(line.getText(), box.left,
+                                        box.top, box.right, box.bottom, false, "글자 인식"));
                             }
                         }
                         observation.visibleText = visible.toString();
@@ -92,21 +97,82 @@ final class ScreenReader {
         }
         for (int i = 0; i < node.getChildCount(); i++) append(node.getChild(i), text, visited);
     }
-    static Rect findNext(AccessibilityNodeInfo root, int screenHeight) {
-        return findNext(root, screenHeight, new int[]{0});
+    private static final class NodeButton {
+        final NextButtonDetector.Label label;
+        final AccessibilityNodeInfo action;
+        NodeButton(NextButtonDetector.Label label, AccessibilityNodeInfo action) {
+            this.label = label; this.action = action;
+        }
     }
-    private static Rect findNext(AccessibilityNodeInfo node, int h, int[] visited) {
-        if (node == null || ++visited[0] > 500) return null;
-        if (node.isVisibleToUser() && node.isEnabled()
-                && (ButtonPolicy.isNext(String.valueOf(node.getText())) || ButtonPolicy.isNext(String.valueOf(node.getContentDescription())))) {
-            Rect box = new Rect(); node.getBoundsInScreen(box);
-            if (!box.isEmpty() && box.centerY() > h * .45 && box.bottom < h) return box;
+    static void resolveNext(AccessibilityNodeInfo root, Observation observation, int w, int h) {
+        List<NextButtonDetector.Label> labels = new ArrayList<>(observation.labels);
+        for (NodeButton button : nodeButtons(root)) labels.add(button.label);
+        collectFooters(root, labels, new int[]{0});
+        NextButtonDetector.Label next = NextButtonDetector.choose(labels, w, h);
+        observation.next = next == null ? null : new Rect(next.left, next.top, next.right, next.bottom);
+        observation.nextLabel = next == null ? "" : next.text;
+        observation.nextSource = next == null ? "" : next.source;
+        observation.footerReady = NextButtonDetector.hasFooterBelow(labels, next, w, h);
+    }
+    /** Reacquire the enabled control immediately before acting; never retain old UI nodes. */
+    static boolean clickNext(AccessibilityNodeInfo root, Rect expected, int w, int h, int tolerance) {
+        List<NodeButton> buttons = nodeButtons(root);
+        List<NextButtonDetector.Label> labels = new ArrayList<>();
+        for (NodeButton button : buttons) labels.add(button.label);
+        NextButtonDetector.Label chosen = NextButtonDetector.choose(labels, w, h);
+        if (chosen == null || Math.abs(chosen.cx() - expected.centerX()) > tolerance
+                || Math.abs(chosen.cy() - expected.centerY()) > tolerance) return false;
+        for (NodeButton button : buttons) {
+            if (button.label == chosen && button.action != null)
+                return button.action.performAction(AccessibilityNodeInfo.ACTION_CLICK);
         }
-        for (int i = 0; i < node.getChildCount(); i++) {
-            Rect candidate = findNext(node.getChild(i), h, visited);
-            if (candidate != null) return candidate;
+        return false;
+    }
+    private static List<NodeButton> nodeButtons(AccessibilityNodeInfo root) {
+        List<NodeButton> result = new ArrayList<>();
+        collectButtons(root, result, new int[]{0}); return result;
+    }
+    private static void collectFooters(AccessibilityNodeInfo node, List<NextButtonDetector.Label> out, int[] visited) {
+        if (node == null || ++visited[0] > 500) return;
+        if (node.isVisibleToUser()) {
+            for (String text : new String[]{String.valueOf(node.getText()), String.valueOf(node.getContentDescription())}) {
+                if (ButtonPolicy.isEpisodeFooter(text)) {
+                    Rect box = new Rect(); node.getBoundsInScreen(box);
+                    out.add(new NextButtonDetector.Label(text, box.left, box.top, box.right, box.bottom, false, "회차 하단"));
+                }
+            }
         }
-        return null;
+        for (int i = 0; i < node.getChildCount(); i++) collectFooters(node.getChild(i), out, visited);
+    }
+    private static void collectButtons(AccessibilityNodeInfo node, List<NodeButton> out, int[] visited) {
+        if (node == null || ++visited[0] > 500 || !node.isEnabled()) return;
+        if (node.isVisibleToUser()) {
+            addButton(node, String.valueOf(node.getText()), "버튼 글자", out);
+            addButton(node, String.valueOf(node.getContentDescription()), "버튼 설명", out);
+            if (node.isClickable()) {
+                if (ButtonPolicy.isNextResourceId(node.getViewIdResourceName()))
+                    addButton(node, "다음 화", "버튼 ID", out);
+                StringBuilder children = new StringBuilder();
+                childLabels(node, children, 0);
+                addButton(node, children.toString(), "버튼 내부 글자", out);
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) collectButtons(node.getChild(i), out, visited);
+    }
+    private static void childLabels(AccessibilityNodeInfo node, StringBuilder text, int depth) {
+        if (node == null || depth > 3 || text.length() > 80 || !node.isVisibleToUser()) return;
+        if (node.getText() != null) text.append(node.getText()).append(' ');
+        else if (node.getContentDescription() != null) text.append(node.getContentDescription()).append(' ');
+        for (int i = 0; i < Math.min(20, node.getChildCount()); i++) childLabels(node.getChild(i), text, depth + 1);
+    }
+    private static void addButton(AccessibilityNodeInfo node, String text, String source, List<NodeButton> out) {
+        if (!ButtonPolicy.isNext(text)) return;
+        Rect box = new Rect(); node.getBoundsInScreen(box);
+        AccessibilityNodeInfo action = node;
+        for (int depth = 0; action != null && !action.isClickable() && depth < 4; depth++) action = action.getParent();
+        if (action != null && (!action.isClickable() || !action.isEnabled() || !action.isVisibleToUser())) action = null;
+        out.add(new NodeButton(new NextButtonDetector.Label(text, box.left, box.top, box.right, box.bottom,
+            action != null, source), action));
     }
     private static int[] fingerprint(Bitmap b) {
         int[] sample = new int[24 * 32];

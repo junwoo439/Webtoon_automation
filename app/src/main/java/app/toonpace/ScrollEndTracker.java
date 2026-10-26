@@ -2,11 +2,11 @@ package app.toonpace;
 
 /** Similar artwork alone is not evidence that a scroll reached the end. */
 final class ScrollEndTracker {
-    private int visualStill, stillSwipes, lastY = -1;
+    private int visualStill, stillSwipes, bottomSwipes, lastY = -1;
     private long swipeStarted;
     private boolean attempted, moved, atBottom;
 
-    void reset() { visualStill = 0; stillSwipes = 0; lastY = -1; attempted = moved = atBottom = false; }
+    void reset() { visualStill = 0; stillSwipes = 0; bottomSwipes = 0; lastY = -1; attempted = moved = atBottom = false; }
     void beginSwipe(long now) { swipeStarted = now; attempted = true; moved = false; atBottom = false; }
     void onScroll(long eventTime, int deltaY, int y) { onScroll(eventTime, deltaY, y, -1); }
     void onScroll(long eventTime, int deltaY, int y, int maxY) {
@@ -22,9 +22,12 @@ final class ScrollEndTracker {
         if (!attempted) return false;
         visualStill = similar ? visualStill + 1 : 0;
         stillSwipes = similar && !moved ? stillSwipes + 1 : 0;
+        // A fixed, explicit bottom position is stronger evidence than screenshot
+        // similarity: animated recommendations must not keep a finished episode open.
+        bottomSwipes = atBottom && !moved ? bottomSwipes + 1 : 0;
         attempted = false;
         return stillSwipes >= 4;
     }
-    boolean nextReady() { return atBottom && visualStill >= 2; }
+    boolean nextReady() { return atBottom && (visualStill >= 2 || bottomSwipes >= 2); }
     boolean repeatedlyStalled() { return stillSwipes >= 10; }
 }

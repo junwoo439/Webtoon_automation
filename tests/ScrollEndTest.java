@@ -55,6 +55,15 @@ public final class ScrollEndTest {
         check(!tracker.nextReady(), "Bottom evidence is refreshed for each swipe");
         tracker.onScroll(12100, 400, 2400, 4000); tracker.stalled(true);
         check(!tracker.nextReady(), "Lazy-loaded content clears bottom evidence");
+        tracker.reset();
+        tracker.beginSwipe(20000); tracker.onScroll(20100, 400, 5000, 5000); tracker.stalled(false);
+        check(!tracker.nextReady(), "First arrival at bottom is not yet stable");
+        tracker.beginSwipe(21000); tracker.onScroll(21100, 400, 5000, 5000); tracker.stalled(false);
+        check(!tracker.nextReady(), "One static bottom sample is insufficient");
+        tracker.beginSwipe(22000); tracker.onScroll(22100, 400, 5000, 5000); tracker.stalled(false);
+        check(tracker.nextReady(), "Animated recommendations do not override repeated explicit bottom evidence");
+        tracker.beginSwipe(23000); tracker.onScroll(23100, 400, 5400, 9000); tracker.stalled(false);
+        check(!tracker.nextReady(), "Loading more content cancels bottom readiness");
         System.out.println("PASS: " + checks + " end detection checks");
     }
 }

@@ -1,5 +1,13 @@
 plugins { id 'com.android.application' }
 
+// Upload credentials are supplied locally; never put a keystore or password in Git.
+def uploadNames = ['TOONPACE_UPLOAD_STORE_FILE', 'TOONPACE_UPLOAD_STORE_PASSWORD',
+                   'TOONPACE_UPLOAD_KEY_ALIAS', 'TOONPACE_UPLOAD_KEY_PASSWORD']
+def uploadValues = uploadNames.collect { providers.environmentVariable(it).orNull }
+if (uploadValues.any { it } && !uploadValues.every { it }) {
+    throw new GradleException('Set all four TOONPACE_UPLOAD_* variables to sign a release.')
+}
+
 android {
     namespace 'app.toonpace'
     compileSdk 35
@@ -7,14 +15,30 @@ android {
         applicationId 'app.toonpace'
         minSdk 30
         targetSdk 35
-        versionCode 4
-        versionName '0.1.3'
+        versionCode 5
+        versionName '0.1.4'
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    buildTypes { release { minifyEnabled false } }
+    signingConfigs {
+        if (uploadValues.every { it }) {
+            upload {
+                storeFile file(uploadValues[0])
+                storePassword uploadValues[1]
+                keyAlias uploadValues[2]
+                keyPassword uploadValues[3]
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (uploadValues.every { it }) signingConfig signingConfigs.upload
+        }
+    }
+    buildFeatures { buildConfig true }
 }
 
 dependencies {
