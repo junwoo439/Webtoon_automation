@@ -26,6 +26,34 @@ final class NextButtonDetector {
         }
         return false;
     }
+    /** A standalone '끝' in dialogue must never be enough to skip a chapter. */
+    static ButtonPolicy.EpisodeProgress endPanel(List<Label> labels, Label next, int width, int height) {
+        if (next == null || !visible(next, width, height)) return null;
+        boolean previousBelow = false;
+        for (Label label : labels) {
+            if (ButtonPolicy.isPrevious(label.text) && visible(label, width, height)
+                    && follows(label, next, width, height * .18)) previousBelow = true;
+        }
+        if (!previousBelow) return null;
+        ButtonPolicy.EpisodeProgress found = null;
+        for (Label end : labels) {
+            if (!ButtonPolicy.isEndMarker(end.text) || !visible(end, width, height)
+                    || !follows(next, end, width, height * .16)) continue;
+            for (Label counter : labels) {
+                ButtonPolicy.EpisodeProgress progress = ButtonPolicy.episodeProgress(counter.text);
+                if (progress == null || !visible(counter, width, height)
+                        || !follows(end, counter, width, height * .12)) continue;
+                // Disagreeing OCR and accessibility counters are not reliable evidence.
+                if (found != null && (found.current != progress.current || found.total != progress.total)) return null;
+                found = progress;
+            }
+        }
+        return found;
+    }
+    private static boolean follows(Label below, Label above, int width, double maxGap) {
+        return below.top >= above.bottom && below.top - above.bottom <= maxGap
+            && Math.abs(below.cx() - above.cx()) <= width * .12;
+    }
     static Label choose(List<Label> labels, int width, int height) {
         List<Label> candidates = new ArrayList<>();
         for (Label label : labels)

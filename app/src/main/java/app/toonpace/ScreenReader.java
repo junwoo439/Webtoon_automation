@@ -21,7 +21,8 @@ final class ScreenReader {
         String visibleText = "";
         Rect next;
         String nextLabel = "", nextSource = "";
-        boolean blocked, footerReady;
+        boolean blocked, footerReady, lastEpisode;
+        String endPanelContext = "";
         final List<NextButtonDetector.Label> labels = new ArrayList<>();
         int[] fingerprint;
         boolean similarTo(Observation old) {
@@ -113,6 +114,14 @@ final class ScreenReader {
         observation.nextLabel = next == null ? "" : next.text;
         observation.nextSource = next == null ? "" : next.source;
         observation.footerReady = NextButtonDetector.hasFooterBelow(labels, next, w, h);
+        ButtonPolicy.EpisodeProgress panel = NextButtonDetector.endPanel(labels, next, w, h);
+        if (panel != null) {
+            observation.endPanelContext = panel.current + "/" + panel.total;
+            observation.lastEpisode = !panel.hasNext();
+            observation.footerReady |= panel.hasNext();
+            // Explicit last-chapter evidence also blocks the ordinary stalled-scroll fallback.
+            if (observation.lastEpisode) observation.next = null;
+        }
     }
     /** Reacquire the enabled control immediately before acting; never retain old UI nodes. */
     static boolean clickNext(AccessibilityNodeInfo root, Rect expected, int w, int h, int tolerance) {
@@ -136,7 +145,8 @@ final class ScreenReader {
         if (node == null || ++visited[0] > 500) return;
         if (node.isVisibleToUser()) {
             for (String text : new String[]{String.valueOf(node.getText()), String.valueOf(node.getContentDescription())}) {
-                if (ButtonPolicy.isEpisodeFooter(text)) {
+                if (ButtonPolicy.isEpisodeFooter(text) || ButtonPolicy.isEndMarker(text)
+                        || ButtonPolicy.isPrevious(text) || ButtonPolicy.episodeProgress(text) != null) {
                     Rect box = new Rect(); node.getBoundsInScreen(box);
                     out.add(new NextButtonDetector.Label(text, box.left, box.top, box.right, box.bottom, false, "회차 하단"));
                 }

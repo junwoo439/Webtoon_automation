@@ -201,8 +201,10 @@ public final class ReaderService extends AccessibilityService {
         if (requested == Mode.CHECK) {
             capture(generation, observation -> {
                 String result = observation.blocked ? "결제·로그인·광고 시청 문구가 있어 자동 이동을 멈춥니다."
+                    : observation.lastEpisode ? "마지막 회차 표시를 확인했어요. 자동 이동하지 않습니다."
                     : observation.next == null ? "다음 화 버튼을 확실히 찾지 못했어요. 버튼이 보이는 화면을 확인해 주세요."
                     : "인식: " + observation.nextLabel + "\n방법: " + observation.nextSource
+                        + (observation.endPanelContext.isEmpty() ? "" : "\n끝 표시 · 회차 " + observation.endPanelContext)
                         + (observation.footerReady ? "\n회차 하단 영역도 확인했어요." : "\n회차 하단 또는 스크롤 끝 확인이 필요해요.")
                         + "\n자동 이동을 켜고 ▶를 눌러 주세요.";
                 stop("인식 확인 완료");
@@ -253,6 +255,7 @@ public final class ReaderService extends AccessibilityService {
     private void tick(int token) {
         if (!valid(token) || mode != Mode.AUTO) return;
         capture(token, observation -> {
+            if (observation.lastEpisode) { stop("마지막 회차 표시를 확인해 멈췄어요"); return; }
             boolean stalled = endTracker.stalled(observation.similarTo(previous));
             previous = observation;
             if ((observation.next != null && (observation.footerReady || stalled || endTracker.nextReady()))
@@ -260,7 +263,7 @@ public final class ReaderService extends AccessibilityService {
                 if (observation.next == null) { stop("여러 번 내려도 이동을 확인하지 못했어요. 화면을 확인해 주세요"); return; }
                 if (!prefs.autoNext()) { stop("끝에 도착했어요. 다음 화를 직접 눌러 주세요"); return; }
                 if (SystemClock.uptimeMillis() - lastNext < 15_000) { stop("연속 이동을 막기 위해 멈췄어요"); return; }
-                countdownNext(token, new Rect(observation.next), observation.footerReady); return;
+                countdownNext(token, new Rect(observation.next), observation.footerReady, observation.endPanelContext); return;
             }
             readingCharacters = observation.characters; readingSince = SystemClock.uptimeMillis();
             scheduleScroll(token);
@@ -303,11 +306,12 @@ public final class ReaderService extends AccessibilityService {
         if (delay > 0) handler.postDelayed(() -> afterScrollSettled(token), delay);
         else tick(token);
     }
-    private void countdownNext(int token, Rect expected, boolean requireFooter) {
+    private void countdownNext(int token, Rect expected, boolean requireFooter, String expectedPanel) {
         message("3초 후 다음 화 · 취소하려면 Ⅱ 정지");
         handler.postDelayed(() -> capture(token, fresh -> {
             if (mode != Mode.AUTO || !prefs.autoNext() || fresh.next == null
                     || (requireFooter && !fresh.footerReady)
+                    || !expectedPanel.equals(fresh.endPanelContext)
                     || Math.abs(fresh.next.centerX() - expected.centerX()) > dp(40)
                     || Math.abs(fresh.next.centerY() - expected.centerY()) > dp(40)) {
                 stop("버튼이나 화면이 바뀌어 멈췄어요"); return;
